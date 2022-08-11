@@ -4,12 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/ioutil"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/shurcooL/githubv4"
 	"github.com/sirupsen/logrus"
 
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/test-infra/prow/github"
 	"k8s.io/test-infra/prow/github/fakegithub"
 	"k8s.io/test-infra/prow/tide"
@@ -443,3 +447,158 @@ func TestEnabledPRs(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadFromDisk(t *testing.T) {
+	tmp := "backoff.cache"
+	defer func() {
+		tmp := "backoff.cache"
+		err := os.Remove(tmp)
+		if err != nil {
+			fmt.Errorf("failed to write file %s: %w", tmp, err)
+		}
+	}()
+	logger := logrus.NewEntry(logrus.StandardLogger())
+	bytes := []byte(`pr:
+  last_considered_time: "2200-01-01T00:00:00Z"`)
+	if err := ioutil.WriteFile(tmp, bytes, 0644); err != nil {
+		fmt.Errorf("failed to write file %s: %w", tmp, err)
+	}
+	testCases := []struct {
+		name           string
+		file           string
+		cacheRecordAge string
+		expectedError  error
+	}{
+		{
+			name:           "basic case",
+			file:           "backoff.cache",
+			cacheRecordAge: "24h",
+			expectedError:  nil,
+		},
+		{
+			name:           "empty file",
+			file:           "",
+			cacheRecordAge: "24h",
+			expectedError:  nil,
+		},
+		{
+			name:           "old pr",
+			file:           "backoff.cache",
+			cacheRecordAge: "24h",
+			expectedError:  nil,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cacheRecordAge, _ := time.ParseDuration(tc.cacheRecordAge)
+			backoff := &backoffCache{file: tc.file, cacheRecordAge: cacheRecordAge, logger: logger}
+			err := backoff.loadFromDisk()
+			if diff := cmp.Diff(tc.expectedError, err, testhelper.EquateErrorMessage); diff != "" {
+				t.Errorf("Error differs from expected:\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestSaveToDisk(t *testing.T) {
+	logger := logrus.NewEntry(logrus.StandardLogger())
+	defer func() {
+		tmp := "backoff.cache"
+		err := os.Remove(tmp)
+		if err != nil {
+			fmt.Errorf("failed to write file %s: %w", tmp, err)
+		}
+	}()
+	testCases := []struct {
+		name           string
+		cache          map[string]*PullRequest
+		file           string
+		cacheRecordAge string
+		expectedError  error
+	}{
+		{
+			name:           "basic case",
+			cache:          map[string]*PullRequest{"pr": {LastConsideredTime: v1.Now()}},
+			file:           "backoff.cache",
+			cacheRecordAge: "24h",
+			expectedError:  nil,
+		},
+		{
+			name:           "empty file",
+			cache:          map[string]*PullRequest{},
+			file:           "",
+			cacheRecordAge: "24h",
+			expectedError:  nil,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cacheRecordAge, _ := time.ParseDuration(tc.cacheRecordAge)
+			backoff := &backoffCache{cache: tc.cache, file: tc.file, cacheRecordAge: cacheRecordAge, logger: logger}
+			err := backoff.saveToDisk()
+			if diff := cmp.Diff(tc.expectedError, err, testhelper.EquateErrorMessage); diff != "" {
+				t.Errorf("Error differs from expected:\n%s", diff)
+			}
+		})
+	}
+}
+
+/* func TestAtLeastOneRequiredJob(t *testing.T) {
+	logger := logrus.NewEntry(logrus.StandardLogger())
+	testCases := []struct {
+		name          string
+		c             *retestController
+		candidates    map[string]tide.PullRequest
+		expected      map[string]tide.PullRequest
+		expectedError error
+	}{
+		{
+			name: "basic case",
+			c: &retestController{
+				config: &Config{Retester: Retester{
+					RetesterPolicy: RetesterPolicy{MaxRetestsForShaAndBase: 1, MaxRetestsForSha: 1, Enabled: &True}, Oranizations: map[string]Oranization{
+						"openshift": {RetesterPolicy: RetesterPolicy{Enabled: &False},
+							Repos: map[string]Repo{"ci-tools": {RetesterPolicy: RetesterPolicy{Enabled: &True}}},
+						},
+						"org-a": {RetesterPolicy: RetesterPolicy{Enabled: &True}},
+					},
+				}},
+				logger: logger,
+			},
+			candidates: map[string]tide.PullRequest{
+				"a": {
+					Number: 1,
+					Repository: struct {
+						Name          githubv4.String
+						NameWithOwner githubv4.String
+						Owner         struct{ Login githubv4.String }
+					}{Name: "ci-tools", Owner: struct{ Login githubv4.String }{Login: "openshift"}},
+				},
+			},
+			expected: map[string]tide.PullRequest{
+				"a": {
+					Number: 1,
+					Repository: struct {
+						Name          githubv4.String
+						NameWithOwner githubv4.String
+						Owner         struct{ Login githubv4.String }
+					}{Name: "ci-tools", Owner: struct{ Login githubv4.String }{Login: "openshift"}},
+				},
+			},
+			expectedError: fmt.Errorf("failed"),
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			actual, err := tc.c.atLeastOneRequiredJob(tc.candidates)
+			if diff := cmp.Diff(tc.expectedError, err, testhelper.EquateErrorMessage); diff != "" {
+				t.Errorf("Error differs from expected:\n%s", diff)
+			}
+			if tc.expectedError == nil {
+				if diff := cmp.Diff(tc.expected, actual); diff != "" {
+					t.Errorf("%s differs from expected:\n%s", tc.name, diff)
+				}
+			}
+		})
+	}
+} */

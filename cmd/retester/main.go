@@ -1,8 +1,8 @@
 package main
 
 import (
-	"context"
 	"flag"
+	"fmt"
 	"os"
 	"time"
 
@@ -12,16 +12,8 @@ import (
 	prowflagutil "k8s.io/test-infra/prow/flagutil"
 	configflagutil "k8s.io/test-infra/prow/flagutil/config"
 	"k8s.io/test-infra/prow/git/v2"
-	"k8s.io/test-infra/prow/github"
 	"k8s.io/test-infra/prow/interrupts"
 )
-
-type githubClient interface {
-	GetCombinedStatus(org, repo, ref string) (*github.CombinedStatus, error)
-	GetRef(string, string, string) (string, error)
-	QueryWithGitHubAppsSupport(ctx context.Context, q interface{}, vars map[string]interface{}, org string) error
-	CreateComment(owner, repo string, number int, comment string) error
-}
 
 type options struct {
 	config configflagutil.ConfigOptions
@@ -30,10 +22,12 @@ type options struct {
 	runOnce bool
 	dryRun  bool
 
-	interval time.Duration
+	interval    time.Duration
+	intervalRaw string
 
-	cacheFile      string
-	cacheRecordAge time.Duration
+	cacheFile         string
+	cacheRecordAge    time.Duration
+	cacheRecordAgeRaw string
 
 	configFile string
 }
@@ -42,6 +36,16 @@ func (o *options) Validate() error {
 	for _, group := range []flagutil.OptionGroup{&o.github, &o.config} {
 		if err := group.Validate(o.dryRun); err != nil {
 			return err
+		} else {
+			var err error
+			o.interval, err = time.ParseDuration(o.intervalRaw)
+			if err != nil {
+				return fmt.Errorf("could not parse interval: %v", err)
+			}
+			o.cacheRecordAge, err = time.ParseDuration(o.cacheRecordAgeRaw)
+			if err != nil {
+				return fmt.Errorf("could not parse cache record age: %v", err)
+			}
 		}
 	}
 	return nil
@@ -51,14 +55,11 @@ func gatherOptions() options {
 	o := options{}
 	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 
-	var intervalRaw string
-	var cacheRecordAgeRaw string
-
 	fs.BoolVar(&o.dryRun, "dry-run", true, "Dry run for testing. Uses API tokens but does not mutate.")
 	fs.BoolVar(&o.runOnce, "run-once", false, "If true, run only once then quit.")
-	fs.StringVar(&intervalRaw, "interval", "1h", "Parseable duration string that specifies the sync period")
+	fs.StringVar(&o.intervalRaw, "interval", "1h", "Parseable duration string that specifies the sync period")
 	fs.StringVar(&o.cacheFile, "cache-file", "", "File to persist cache. No persistence of cache if not set")
-	fs.StringVar(&cacheRecordAgeRaw, "cache-record-age", "168h", "Parseable duration string that specifies how long a cache record lives in cache after the last time it was considered")
+	fs.StringVar(&o.cacheRecordAgeRaw, "cache-record-age", "168h", "Parseable duration string that specifies how long a cache record lives in cache after the last time it was considered")
 	fs.StringVar(&o.configFile, "config-file", "", "Path to the configure file of the retest.")
 
 	for _, group := range []flagutil.OptionGroup{&o.github, &o.config} {
@@ -67,16 +68,6 @@ func gatherOptions() options {
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		logrus.WithError(err).Fatal("could not parse input")
-	}
-
-	var err error
-	o.interval, err = time.ParseDuration(intervalRaw)
-	if err != nil {
-		logrus.WithError(err).Fatal("could not parse interval")
-	}
-	o.cacheRecordAge, err = time.ParseDuration(cacheRecordAgeRaw)
-	if err != nil {
-		logrus.WithError(err).Fatal("could not parse cache record age")
 	}
 
 	return o
