@@ -1,10 +1,13 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/openshift/ci-tools/pkg/testhelper"
+	flagutil "k8s.io/test-infra/prow/flagutil/config"
 )
 
 func TestGatherOptions(t *testing.T) {
@@ -65,16 +68,16 @@ func TestGatherOptions(t *testing.T) {
 	}
 }
 
-/* func TestValidate(t *testing.T) {
-	os.Args = []string{"cmd", "--cache-record-age=100h", "--interval=2h", "--config-file=config.yaml"}
+func TestValidate(t *testing.T) {
 	testCases := []struct {
 		name     string
 		o        options
 		expected error
 	}{
 		{
-			name: "config",
+			name: "basic",
 			o: options{
+				config:            flagutil.ConfigOptions{ConfigPath: "/etc/config/config.yaml"},
 				runOnce:           false,
 				dryRun:            true,
 				intervalRaw:       "1h",
@@ -83,6 +86,34 @@ func TestGatherOptions(t *testing.T) {
 				configFile:        "",
 			},
 			expected: nil,
+		},
+		{
+			name: "no-config-patn",
+			o: options{
+				//not set config path results: error(*errors.errorString) *{s: "-- is mandatory"}
+				config:            flagutil.ConfigOptions{ConfigPathFlagName: "config-path"},
+				intervalRaw:       "1h",
+				cacheRecordAgeRaw: "168h",
+			},
+			expected: errors.New("--config-path is mandatory"),
+		},
+		{
+			name: "invalid intervalRaw",
+			o: options{
+				config:            flagutil.ConfigOptions{ConfigPathFlagName: "config-path"},
+				intervalRaw:       "no-time",
+				cacheRecordAgeRaw: "168h",
+			},
+			expected: errors.New("could not parse interval: time: invalid duration \"no-time\""),
+		},
+		{
+			name: "empty cacheRecordAgeRaw",
+			o: options{
+				config:            flagutil.ConfigOptions{ConfigPathFlagName: "config-path"},
+				intervalRaw:       "1h",
+				cacheRecordAgeRaw: "",
+			},
+			expected: errors.New("could not parse cache record age: time: invalid duration \"\""),
 		},
 	}
 	for _, tc := range testCases {
@@ -93,4 +124,4 @@ func TestGatherOptions(t *testing.T) {
 			}
 		})
 	}
-} */
+}
