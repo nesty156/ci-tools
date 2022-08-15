@@ -93,5 +93,4 @@ func TestGatherOptions(t *testing.T) {
 			}
 		})
 	}
-}
-*/
+} */

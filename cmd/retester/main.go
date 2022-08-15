@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/openshift/ci-tools/pkg/retester"
 	"github.com/sirupsen/logrus"
 
 	"k8s.io/test-infra/pkg/flagutil"
@@ -94,12 +95,12 @@ func main() {
 		logrus.WithError(err).Fatal("Error starting config agent.")
 	}
 
-	config, err := loadConfig(o.configFile)
+	config, err := retester.LoadConfig(o.configFile)
 	if err != nil {
 		logrus.WithError(err).Fatal("Failed to load config from file")
 	}
 
-	c := newController(gc, configAgent.Config, git.ClientFactoryFrom(gitClient), o.github.AppPrivateKeyPath != "", o.cacheFile, o.cacheRecordAge, config)
+	c := retester.NewController(gc, configAgent.Config, git.ClientFactoryFrom(gitClient), o.github.AppPrivateKeyPath != "", o.cacheFile, o.cacheRecordAge, config)
 
 	interrupts.OnInterrupt(func() {
 		if err := gitClient.Clean(); err != nil {
@@ -123,8 +124,8 @@ func main() {
 	interrupts.WaitForGracefulShutdown()
 }
 
-func execute(c *retestController) {
-	if err := c.sync(); err != nil {
+func execute(c *retester.RetestController) {
+	if err := c.Run(); err != nil {
 		logrus.WithError(err).Error("Error syncing")
 	}
 }
